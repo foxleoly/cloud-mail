@@ -8,6 +8,13 @@ on:
       - "mail-vue/**"
   workflow_dispatch:
 
+concurrency:
+  group: deploy-cloud-mail-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 jobs:
   Deploy-cloud-mail:
     name: 🏗️ Build and Deploy
@@ -28,7 +35,7 @@ jobs:
       AI_MODEL: ${{ secrets.AI_MODEL || vars.AI_MODEL || '@cf/meta/llama-3.1-8b-instruct-fast' }}
       CLOUDFLARE_EMAIL: ${{ secrets.CF_EMAIL || vars.CF_EMAIL || false }}
       ANALYSIS_CACHE: ${{ secrets.ANALYSIS_CACHE || vars.ANALYSIS_CACHE || false }}
-      WORKERS_SUBDOMAIN: ${{ secrets.WORKERS_SUBDOMAIN || vars.WORKERS_SUBDOMAIN }}
+      WORKERS_SUBDOMAIN: ${{ vars.WORKERS_SUBDOMAIN }}
 
 
     outputs:
@@ -38,6 +45,8 @@ jobs:
     steps:
       - name: 🚚 检出代码仓库 / Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: ⚙ 设置 pnpm / Set up pnpm
         uses: pnpm/action-setup@v4.1.0
@@ -62,7 +71,7 @@ jobs:
       - name: 🛠️ 设置环境 / Set up environment
         working-directory: ./mail-worker
         run: |
-          
+          echo "::add-mask::$JWT_SECRET"
           echo "🔐 Starting environment setup..."
           
           if [ -z "$JWT_SECRET" ] || grep -q '[?%#/\\]' <<< "$JWT_SECRET"; then
@@ -246,7 +255,7 @@ jobs:
           fi
           
           if [ -z "$WORKER_URL" ]; then
-            echo "::warning::Preview URL not available. Set CUSTOM_DOMAIN or WORKERS_SUBDOMAIN."
+            echo "::warning::Set CUSTOM_DOMAIN or WORKERS_SUBDOMAIN"
             exit 0
           fi
           
@@ -256,13 +265,7 @@ jobs:
           if [ "$RESPONSE_BODY" = "success" ]; then
             echo "✅ Setup completed."
           else
-            echo "::warning::Database initialization failed. HTTP: $HTTP_CODE, $RESPONSE_BODY"
+            echo "::warning::Database initialization failed (HTTP: $HTTP_CODE)"
+            echo "Response: $RESPONSE_BODY"
             exit 0
           fi
-
-      - name: 🗑️ 删除运行记录 / Delete workflow runs
-        uses: GitRML/delete-workflow-runs@main
-        continue-on-error: true
-        with:
-          retain_days: '1'
-          keep_minimum_runs: '0'
