@@ -16,23 +16,16 @@ jobs:
           NAME: ${{ vars.NAME }}
         run: |
           set +e
-          echo "=== A. Worker versions (who deployed what, when) ==="
+          echo "=== A. Workers Builds config (is git-connected autopilot on?) ==="
           curl -s -H "Authorization: Bearer $CF_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/$NAME/versions" \
-            | jq -c '[.result[]? | {id: .id[0:8], created: .created_on, source: (.metadata.source // "n/a"), bindings_count: (.resources.bindings | length), has_kv: ([.resources.bindings[]? | select(.type=="kv_namespace")] | length), has_d1: ([.resources.bindings[]? | select(.type=="d1")] | length), has_r2: ([.resources.bindings[]? | select(.type=="r2_bucket")] | length)}]'
-          echo "=== B. Active deployments ==="
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/$NAME/build-config" \
+            | jq -c '{success, errors, result}' | head -c 1200
+          echo ""
+          echo "=== B. Recent builds ==="
           curl -s -H "Authorization: Bearer $CF_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/$NAME/deployments" \
-            | jq -c '{success, errors, deployments: [.result.deployments[]? | {id: .id[0:8], created: .created_on, source: (.source // "n/a"), strategy, version: (.versions[0].version_id[0:8] // "n/a")}]}'
-          echo "=== C. Latest version bindings detail ==="
-          LATEST=$(curl -s -H "Authorization: Bearer $CF_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/$NAME/versions" \
-            | jq -r '.result[0].id')
-          echo "latest version: $LATEST"
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/$NAME/builds" \
+            | jq -c '{success, errors, builds: [.result[]? | {id: (.id // "?")[0:8], status, created: .created_at}][0:6]}'
+          echo "=== C. Current script settings bindings after redeploy ==="
           curl -s -H "Authorization: Bearer $CF_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/$NAME/versions/$LATEST" \
-            | jq -c '{success, bindings: [.result.resources.bindings[]? | {type, name}]}'
-          echo "=== D. Worker subdomain & routes sanity ==="
-          curl -s -H "Authorization: Bearer $CF_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/$NAME/subdomain" \
-            | jq -c '{success, errors, result}'
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/$NAME/settings" \
+            | jq -c '{success, bindings: [.result.bindings[]? | .name] | sort}'
