@@ -14,26 +14,19 @@ jobs:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           NAME: ${{ vars.NAME }}
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          CUSTOM_DOMAIN: ${{ vars.CUSTOM_DOMAIN }}
         run: |
           set +e
-          echo "=== A. Active deployment version bindings ==="
-          VER=$(curl -s -H "Authorization: Bearer $CF_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/$NAME/deployments" \
-            | jq -r '.result.deployments[0].versions[0].version_id')
-          echo "active version: ${VER:0:8}"
-          curl -s -H "Authorization: Bearer $CF_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/$NAME/versions/$VER" \
-            | jq -c '{success, errors, bindings: [(.result.resources.binding_list // .result.resources.bindings // [])[]? | {name, type}] | sort_by(.name)}' | head -c 1500
-          echo ""
-          echo "=== B. Runtime truth: hit /api/init (touches D1 + KV) ==="
-          HTTP=$(curl -s -o BODY -w "%{http_code}" --max-time 30 "https://$CUSTOM_DOMAIN/api/init/$JWT_SECRET")
-          echo "HTTP $HTTP"
-          echo "body: $(head -c 300 BODY)"
-          echo "=== C. Worker tail via API (recent errors, 5s sample) ==="
-          TAIL=$(curl -s -X PUT -H "Authorization: Bearer $CF_TOKEN" \
-            -H "Content-Type: application/json" \
-            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/observability/telemetry/query/$NAME" \
-            -d '{"queryId":"worker-errors","timeframe":{"from":'"$(date -u -d '30 minutes ago' +%s)"'000,"to":'"$(date +%s)"'000},"parameters":{"datasets":["cloudflare-workers"],"filters":[{"id":"a","key":"$metadata.level","value":"error","operation":"eq"}],"calculations":[],"groupBys":[],"havings":[]},"view":"events","limit":100}')
-          echo "$TAIL" | jq -c '{success, errors, error_events: [.result.events[]? | {ts: .timestamp[0:19], msg: ((.WorkerExceptions[].message // .message // "?") | .[0:150])}][0:8]}' 2>/dev/null || echo "$TAIL" | head -c 500
+          BASE="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/$NAME"
+          AUTH="Authorization: Bearer $CF_TOKEN"
+          echo "=== A. All deployments (last 6) ==="
+          curl -s -H "$AUTH" "$BASE/deployments" \
+            | jq -c '.result.deployments[0:6][] | {created: .created_on, source: .source, strategy, version: .versions[0].version_id[0:8]}'
+          echo "=== B. Version details: bindings + metadata each ==="
+          for VID in $(curl -s -H "$AUTH" "$BASE/deployments" | jq -r '.result.deployments[0:6][].versions[0].version_id'); do
+            echo "--- ${VID:0:8} ---"
+            curl -s -H "$AUTH" "$BASE/versions/$VID" \
+              | jq -c '{created: .result.created_on, source: .result.metadata.source, author: .result.metadata.author, bindings: [(.result.resources.binding_list // .result.resources.bindings // [])[]? | {n: .name, t: .type}] | sort_by(.n)}' | head -c 1600
+            echo ""
+          done
+          echo "=== C. Script-level settings source of truth ==="
+          curl -s -H "$AUTH" "$BASE/settings" | jq -c '{success, bindings: [.result.bindings[]? | {n: .name, t: .type}] | sort_by(.n)}' | head -c 1600
