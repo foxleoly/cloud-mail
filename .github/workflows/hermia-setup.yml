@@ -34,12 +34,12 @@ jobs:
           echo "=== 3. Register hermia ==="
           curl -s --max-time 30 -X POST "https://$CUSTOM_DOMAIN/api/register" \
             -H 'Content-Type: application/json' \
-            -d "{\"email\":\"hermia@foxleoly.link\",\"password\":\"$HERMIA_PW\"}" -o reg.json -w "HTTP %{http_code}\n"
+            -d "{\"email\":\"hermia@$CUSTOM_DOMAIN\",\"password\":\"$HERMIA_PW\"}" -o reg.json -w "HTTP %{http_code}\n"
           head -c 300 reg.json; echo ""
           echo "=== 4. Login test ==="
           curl -s --max-time 30 -X POST "https://$CUSTOM_DOMAIN/api/login" \
             -H 'Content-Type: application/json' \
-            -d "{\"email\":\"hermia@foxleoly.link\",\"password\":\"$HERMIA_PW\"}" -o login.json -w "HTTP %{http_code}\n"
+            -d "{\"email\":\"hermia@$CUSTOM_DOMAIN\",\"password\":\"$HERMIA_PW\"}" -o login.json -w "HTTP %{http_code}\n"
           jq -c '{code, has_jwt: ((.data // .jwt // "") | type == "string" and length > 20)}' login.json 2>/dev/null || head -c 200 login.json
           echo ""
           echo "=== 5. Restore original setting ==="
