@@ -13,30 +13,26 @@ jobs:
         env:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          KV_ID: ${{ vars.KV_NAMESPACE_ID }}
           NAME: ${{ vars.NAME }}
         run: |
           set +e
-          echo "=== 1. Token verify ==="
-          curl -s -H "Authorization: Bearer $CF_TOKEN" https://api.cloudflare.com/client/v4/user/tokens/verify \
-            | jq -c '{success, errors, status: .result.status}'
-          echo "=== 2. KV namespaces visible to token ==="
+          echo "=== A. Worker versions (who deployed what, when) ==="
           curl -s -H "Authorization: Bearer $CF_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/storage/kv/namespaces?per_page=50" \
-            | jq -c '{success, errors, count: (.result | length), namespaces: [.result[]? | {id, title}]}'
-          echo "=== 3. Target namespace $KV_ID ==="
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/$NAME/versions" \
+            | jq -c '[.result[]? | {id: .id[0:8], created: .created_on, source: (.metadata.source // "n/a"), bindings_count: (.resources.bindings | length), has_kv: ([.resources.bindings[]? | select(.type=="kv_namespace")] | length), has_d1: ([.resources.bindings[]? | select(.type=="d1")] | length), has_r2: ([.resources.bindings[]? | select(.type=="r2_bucket")] | length)}]'
+          echo "=== B. Active deployments ==="
           curl -s -H "Authorization: Bearer $CF_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/storage/kv/namespaces/$KV_ID" \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/$NAME/deployments" \
+            | jq -c '{success, errors, deployments: [.result.deployments[]? | {id: .id[0:8], created: .created_on, source: (.source // "n/a"), strategy, version: (.versions[0].version_id[0:8] // "n/a")}]}'
+          echo "=== C. Latest version bindings detail ==="
+          LATEST=$(curl -s -H "Authorization: Bearer $CF_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/$NAME/versions" \
+            | jq -r '.result[0].id')
+          echo "latest version: $LATEST"
+          curl -s -H "Authorization: Bearer $CF_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/$NAME/versions/$LATEST" \
+            | jq -c '{success, bindings: [.result.resources.bindings[]? | {type, name}]}'
+          echo "=== D. Worker subdomain & routes sanity ==="
+          curl -s -H "Authorization: Bearer $CF_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/$NAME/subdomain" \
             | jq -c '{success, errors, result}'
-          echo "=== 4. KV keys sample (is data still there?) ==="
-          curl -s -H "Authorization: Bearer $CF_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/storage/kv/namespaces/$KV_ID/keys?limit=10" \
-            | jq -c '{success, errors, keys: [.result[]?.name]}'
-          echo "=== 5. Worker settings/bindings ($NAME) ==="
-          curl -s -H "Authorization: Bearer $CF_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/$NAME/settings" \
-            | jq -c '{success, errors, bindings: [.result.bindings[]? | {type, name, namespace_id, id}]}'
-          echo "=== 6. D1 databases ==="
-          curl -s -H "Authorization: Bearer $CF_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/d1/database" \
-            | jq -c '{success, errors, dbs: [.result[]? | {uuid, name}]}'
