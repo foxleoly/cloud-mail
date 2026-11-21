@@ -1,0 +1,42 @@
+name: 🔍 Diagnose Cloudflare KV
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run diagnostics
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          KV_ID: ${{ vars.KV_NAMESPACE_ID }}
+          NAME: ${{ vars.NAME }}
+        run: |
+          set +e
+          echo "=== 1. Token verify ==="
+          curl -s -H "Authorization: Bearer $CF_TOKEN" https://api.cloudflare.com/client/v4/user/tokens/verify \
+            | jq -c '{success, errors, status: .result.status}'
+          echo "=== 2. KV namespaces visible to token ==="
+          curl -s -H "Authorization: Bearer $CF_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/storage/kv/namespaces?per_page=50" \
+            | jq -c '{success, errors, count: (.result | length), namespaces: [.result[]? | {id, title}]}'
+          echo "=== 3. Target namespace $KV_ID ==="
+          curl -s -H "Authorization: Bearer $CF_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/storage/kv/namespaces/$KV_ID" \
+            | jq -c '{success, errors, result}'
+          echo "=== 4. KV keys sample (is data still there?) ==="
+          curl -s -H "Authorization: Bearer $CF_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/storage/kv/namespaces/$KV_ID/keys?limit=10" \
+            | jq -c '{success, errors, keys: [.result[]?.name]}'
+          echo "=== 5. Worker settings/bindings ($NAME) ==="
+          curl -s -H "Authorization: Bearer $CF_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/$NAME/settings" \
+            | jq -c '{success, errors, bindings: [.result.bindings[]? | {type, name, namespace_id, id}]}'
+          echo "=== 6. D1 databases ==="
+          curl -s -H "Authorization: Bearer $CF_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/d1/database" \
+            | jq -c '{success, errors, dbs: [.result[]? | {uuid, name}]}'
